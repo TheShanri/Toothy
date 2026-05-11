@@ -1018,6 +1018,7 @@ class RawArrayPopup(QtWidgets.QDialog):
     
     def __init__(self, data_shape, fs=None, units=None, filename='', parent=None):
         super().__init__(parent)
+        self.setWindowFlag(QtCore.Qt.WindowMaximizeButtonHint)
         assert len(data_shape) == 2, 'Data array must be 2-dimensional.'
         
         self.gen_layout(data_shape, fs, units)

@@ -916,8 +916,9 @@ def remove_help_button(object):
     # Get the current window flags
     flags = object.windowFlags()
 
-    # Remove the WindowContextHelpButtonHint flag
+    # Remove the "?" help button, add maximize button
     flags &= ~QtCore.Qt.WindowContextHelpButtonHint
+    flags |= QtCore.Qt.WindowMaximizeButtonHint
 
     # Set the modified window flags
     object.setWindowFlags(flags)
@@ -927,6 +928,7 @@ class Popup(QtWidgets.QDialog):
     """ Simple popup window to display any widget(s) """
     def __init__(self, widgets=[], orientation='v', title='', parent=None):
         super().__init__(parent)
+        self.setWindowFlag(QtCore.Qt.WindowMaximizeButtonHint)
         self.setWindowTitle(title)
         if orientation   == 'v': self.layout = QtWidgets.QVBoxLayout(self)
         elif orientation == 'h': self.layout = QtWidgets.QHBoxLayout(self)
@@ -973,9 +975,10 @@ class Popup(QtWidgets.QDialog):
         
         
 class ButtonPopup(QtWidgets.QDialog):
-    def __init__(self, *items, orientation='v', label='Select an option', 
+    def __init__(self, *items, orientation='v', label='Select an option',
                  title='', parent=None):
         super().__init__(parent)
+        self.setWindowFlag(QtCore.Qt.WindowMaximizeButtonHint)
         self.label = QtWidgets.QLabel(label)
         self.btns = [QtWidgets.QPushButton(x) for x in items]
         for btn in self.btns:
