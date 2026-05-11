@@ -194,6 +194,7 @@ class ProcessedRecordingSelectionPopup(QtWidgets.QDialog):
     
     def __init__(self, init_ppath=None, parent=None):
         super().__init__(parent)
+        self.setWindowFlag(QtCore.Qt.WindowMaximizeButtonHint)
         self.setWindowTitle('Analyze recording')
         self.setMinimumWidth(300)
         

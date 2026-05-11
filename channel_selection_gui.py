@@ -1312,7 +1312,8 @@ class EventViewPopup(QtWidgets.QDialog):
     """ Popup window containing interactive event plots """
     
     def __init__(self, ch, channels, DF_ALL, fig, parent=None):
-        super().__init__(parent)        
+        super().__init__(parent)
+        self.setWindowFlag(QtCore.Qt.WindowMaximizeButtonHint)
         self.ch = ch
         self.channels = channels
         self.DF_ALL = DF_ALL
@@ -1925,6 +1926,7 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
     
     def __init__(self, ddir, iprb=0, ishank=0, parent=None):
         super().__init__(parent)
+        self.setWindowFlag(QtCore.Qt.WindowMaximizeButtonHint)
         qrect = pyfx.ScreenRect(perc_width=0.9)
         self.setGeometry(qrect)
         

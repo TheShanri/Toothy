@@ -1514,6 +1514,7 @@ class ShankIDPopup(QtWidgets.QDialog):
     
     def __init__(self, xpos, parent=None):
         super().__init__(parent)
+        self.setWindowFlag(QtCore.Qt.WindowMaximizeButtonHint)
         self.xpos = xpos  # all X-coordinates for the current probe
         self.unique_x = np.unique(self.xpos)
         self.nshanks = 1  # dynamically add/subtract shanks
@@ -1835,7 +1836,8 @@ class ProbeObjectPopup(QtWidgets.QDialog):
     
     def __init__(self, probe=None, auto_plot=True, parent=None):
         super().__init__(parent)
-        
+        self.setWindowFlag(QtCore.Qt.WindowMaximizeButtonHint)
+
         # initialize central widget
         self.probe_widget = ProbeDesigner(probe=probe, auto_plot=auto_plot)
         self.accept_btn = self.probe_widget.accept_btn

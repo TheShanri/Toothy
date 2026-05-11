@@ -399,6 +399,7 @@ class DS_CSDWindow(QtWidgets.QDialog):
     
     def __init__(self, ddir, iprb=0, ishank=0, parent=None):
         super().__init__()
+        self.setWindowFlag(QtCore.Qt.WindowMaximizeButtonHint)
         qrect = pyfx.ScreenRect(perc_width=0.8, keep_aspect=False)
         self.setGeometry(qrect)
         
