@@ -98,6 +98,48 @@ class IFigLFP(QtWidgets.QWidget):
         self.canvas_w = FigureCanvas(self.fig_w) # slider canvas
         self.canvas_w.setMaximumHeight(80)
         self.connect_mpl_widgets()
+
+        # typable inputs for X, Y, Z sliders
+        self.spinbox_x = QtWidgets.QSpinBox()
+        self.spinbox_x.setRange(int(self.iw.iwin.valmin), int(self.iw.iwin.valmax))
+        self.spinbox_x.setValue(int(self.iw.iwin.val))
+        self.spinbox_x.setPrefix('X: ')
+        self.spinbox_y = QtWidgets.QSpinBox()
+        self.spinbox_y.setRange(int(self.iw.yfig.valmin), int(self.iw.yfig.valmax))
+        self.spinbox_y.setValue(int(self.iw.yfig.val))
+        self.spinbox_y.setPrefix('Y: ')
+        self.spinbox_z = QtWidgets.QSpinBox()
+        self.spinbox_z.setRange(int(self.iw.ycoeff.valmin), int(self.iw.ycoeff.valmax))
+        self.spinbox_z.setValue(int(self.iw.ycoeff.val))
+        self.spinbox_z.setPrefix('Z: ')
+
+        self.spinbox_x.valueChanged.connect(lambda v: self.iw.iwin.set_val(v))
+        self.spinbox_y.valueChanged.connect(lambda v: self.iw.yfig.set_val(v))
+        self.spinbox_z.valueChanged.connect(lambda v: self.iw.ycoeff.set_val(v))
+
+        def _sync_x(val):
+            self.spinbox_x.blockSignals(True)
+            self.spinbox_x.setValue(int(val))
+            self.spinbox_x.blockSignals(False)
+        def _sync_y(val):
+            self.spinbox_y.blockSignals(True)
+            self.spinbox_y.setValue(int(val))
+            self.spinbox_y.blockSignals(False)
+        def _sync_z(val):
+            self.spinbox_z.blockSignals(True)
+            self.spinbox_z.setValue(int(val))
+            self.spinbox_z.blockSignals(False)
+        self.iw.iwin.on_changed(_sync_x)
+        self.iw.yfig.on_changed(_sync_y)
+        self.iw.ycoeff.on_changed(_sync_z)
+
+        xyz_row = QtWidgets.QWidget()
+        xyz_hlay = QtWidgets.QHBoxLayout(xyz_row)
+        xyz_hlay.setContentsMargins(4, 2, 4, 2)
+        xyz_hlay.addWidget(self.spinbox_x, stretch=1)
+        xyz_hlay.addWidget(self.spinbox_y, stretch=1)
+        xyz_hlay.addWidget(self.spinbox_z, stretch=1)
+
         # embed plots in QScrollArea for vertical zoom
         self.plot_row = QtWidgets.QWidget()
         self.plot_row.setFixedHeight(self.plot_height)
@@ -111,6 +153,7 @@ class IFigLFP(QtWidgets.QWidget):
         self.qscroll.setWidget(self.plot_row)
         self.layout = QtWidgets.QVBoxLayout(self)
         self.layout.addWidget(self.canvas_w)
+        self.layout.addWidget(xyz_row)
         self.layout.addWidget(self.qscroll)
         self.canvas_freq.hide()
         
