@@ -344,10 +344,10 @@ def get_meta_from_recording(recording):
         'nsamples': recording.get_num_samples()
     }
 
-    if recording.__class__.__name__ in ['NumpyRecording', 'NwbRecordingExtractor']:
-        ch_names = recording.get_channel_ids().astype('str')
-    else:
+    if hasattr(recording, 'neo_reader'):
         ch_names = recording.neo_reader.header['signal_channels']['name']
+    else:
+        ch_names = recording.get_channel_ids().astype('str')
     
     # Get the data format (NeuroNexus, OpenEphys, Neuralynx, NWB, NPY, or MAT) which was added to the recording as an annotation during extraction
     data_format = recording.get_annotation('data_format')
