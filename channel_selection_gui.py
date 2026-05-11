@@ -95,11 +95,10 @@ class IFigLFP(QtWidgets.QWidget):
             if tbtn.actions()[0].text() == 'Subplots':
                 tbtn.setEnabled(False)
         self.canvas_freq = FigureCanvas(self.fig_freq) # freq plot canvas
-        self.canvas_w = FigureCanvas(self.fig_w) # slider canvas
-        self.canvas_w.setMaximumHeight(80)
+        self.canvas_w = FigureCanvas(self.fig_w)  # backing canvas for slider objects (not shown)
         self.connect_mpl_widgets()
 
-        # typable inputs for X, Y, Z sliders
+        # typable inputs for X, Y, Z, i
         self.spinbox_x = QtWidgets.QSpinBox()
         self.spinbox_x.setRange(int(self.iw.iwin.valmin), int(self.iw.iwin.valmax))
         self.spinbox_x.setValue(int(self.iw.iwin.val))
@@ -112,10 +111,15 @@ class IFigLFP(QtWidgets.QWidget):
         self.spinbox_z.setRange(int(self.iw.ycoeff.valmin), int(self.iw.ycoeff.valmax))
         self.spinbox_z.setValue(int(self.iw.ycoeff.val))
         self.spinbox_z.setPrefix('Z: ')
+        self.spinbox_i = QtWidgets.QSpinBox()
+        self.spinbox_i.setRange(int(self.iw.i.valmin), int(self.iw.i.valmax))
+        self.spinbox_i.setValue(int(self.iw.i.val))
+        self.spinbox_i.setPrefix('i: ')
 
         self.spinbox_x.valueChanged.connect(lambda v: self.iw.iwin.set_val(v))
         self.spinbox_y.valueChanged.connect(lambda v: self.iw.yfig.set_val(v))
         self.spinbox_z.valueChanged.connect(lambda v: self.iw.ycoeff.set_val(v))
+        self.spinbox_i.valueChanged.connect(lambda v: self.iw.i.set_val(v))
 
         def _sync_x(val):
             self.spinbox_x.blockSignals(True)
@@ -129,16 +133,22 @@ class IFigLFP(QtWidgets.QWidget):
             self.spinbox_z.blockSignals(True)
             self.spinbox_z.setValue(int(val))
             self.spinbox_z.blockSignals(False)
+        def _sync_i(val):
+            self.spinbox_i.blockSignals(True)
+            self.spinbox_i.setValue(int(val))
+            self.spinbox_i.blockSignals(False)
         self.iw.iwin.on_changed(_sync_x)
         self.iw.yfig.on_changed(_sync_y)
         self.iw.ycoeff.on_changed(_sync_z)
+        self.iw.i.on_changed(_sync_i)
 
-        xyz_row = QtWidgets.QWidget()
-        xyz_hlay = QtWidgets.QHBoxLayout(xyz_row)
-        xyz_hlay.setContentsMargins(4, 2, 4, 2)
-        xyz_hlay.addWidget(self.spinbox_x, stretch=1)
-        xyz_hlay.addWidget(self.spinbox_y, stretch=1)
-        xyz_hlay.addWidget(self.spinbox_z, stretch=1)
+        controls_row = QtWidgets.QWidget()
+        controls_hlay = QtWidgets.QHBoxLayout(controls_row)
+        controls_hlay.setContentsMargins(4, 2, 4, 2)
+        controls_hlay.addWidget(self.spinbox_x, stretch=1)
+        controls_hlay.addWidget(self.spinbox_y, stretch=1)
+        controls_hlay.addWidget(self.spinbox_z, stretch=1)
+        controls_hlay.addWidget(self.spinbox_i, stretch=1)
 
         # embed plots in QScrollArea for vertical zoom
         self.plot_row = QtWidgets.QWidget()
@@ -152,10 +162,10 @@ class IFigLFP(QtWidgets.QWidget):
         self.qscroll.setWidgetResizable(True)
         self.qscroll.setWidget(self.plot_row)
         self.layout = QtWidgets.QVBoxLayout(self)
-        self.layout.addWidget(self.canvas_w)
-        self.layout.addWidget(xyz_row)
+        self.layout.addWidget(controls_row)
         self.layout.addWidget(self.qscroll)
         self.canvas_freq.hide()
+        self.spinbox_y.setValue(1000)
         
         self.channel_changed(*event_channels)
     
@@ -265,7 +275,7 @@ class IFigLFP(QtWidgets.QWidget):
                 menu = QtWidgets.QMenu()
                 menu.setStyleSheet(pyfx.dict2ss(QSS.QMENU))
                 headers = []
-                for txt in [f'Time = {tpoint:.2f} s', f'Channel {ch}']:
+                for txt in [f'Time = {tpoint:.2f} s', f'Channel {ch+1}']:
                     hdr = QtWidgets.QWidgetAction(self)
                     lbl = QtWidgets.QLabel(txt)
                     hdr.setDefaultWidget(lbl)
@@ -493,6 +503,7 @@ class IFigLFP(QtWidgets.QWidget):
         """ Use viewing window bounds to update range of index slider """
         imin, imax = (new_iwin, len(self.lfp_time)-new_iwin-1)
         self.iw.i.update_range(imin, imax)
+        self.spinbox_i.setRange(imin, imax)
         i = self.iw.i.val
         if i < imin or i > imax:
             self.iw.i.set_val(i)
@@ -736,7 +747,7 @@ class IFigLFP(QtWidgets.QWidget):
             self.plot_freq_band_pwr()
             
         yticks = -np.array(self.shank_channels)
-        _ = self.ax.set_yticks(yticks, labels=np.int16(abs(yticks)).astype('str'))
+        _ = self.ax.set_yticks(yticks, labels=(np.int16(abs(yticks)) + 1).astype('str'))
         # set x-axis with appropriate units
         self.ax.xaxis.set_major_formatter(self.xax_formatter)
         self.ax.set(xlabel=f'Time ({self.xu})', ylabel='channel index')

@@ -399,7 +399,13 @@ class ReverseSpinBox(QtWidgets.QSpinBox):
     def stepBy(self, steps):
         """ Reimplement stepBy function in opposite direction """
         return super().stepBy(-steps)
-    
+
+    def textFromValue(self, value):
+        return str(value + 1)
+
+    def valueFromText(self, text):
+        return int(text) - 1
+
 
 class EventGroupbox(QtWidgets.QGroupBox):
     """ Event boxes for channel selection, event viewing, and dataset curation """
@@ -413,7 +419,7 @@ class EventGroupbox(QtWidgets.QGroupBox):
         super().__init__(title)
         self.setStyleSheet(pyfx.dict2ss(QSS.EVENT_GBOX))
         # row 1: interactive event channel inputs
-        chan_input_lbl = QtWidgets.QLabel(f'{region} channel:')
+        chan_input_lbl = QtWidgets.QLabel(f'{region} Channel Number:')
         self.chan_input = ReverseSpinBox()
         self.chan_input.setKeyboardTracking(False)
         self.chan_reset = QtWidgets.QPushButton('\u27F3')
