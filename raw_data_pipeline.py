@@ -1330,8 +1330,9 @@ class InputDataSelectionPopup(QtWidgets.QDialog):
     recording = None
     last_saved_ddir = None
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, init_path=None, bulk_mode=False):
         super().__init__(parent)
+        self._bulk_mode = bulk_mode
 
         # Set the window title (changes as the user proceeds through the workflow of this QDialog)
         self.setWindowTitle('Select input data')
@@ -1366,7 +1367,11 @@ class InputDataSelectionPopup(QtWidgets.QDialog):
         # Hide downstream sections of the workflow
         self.probe_gbox.hide()
         self.save_gbox.hide()
-        
+
+        # Pre-load path if provided via bulk mode (deferred until event loop starts)
+        if init_path:
+            QtCore.QTimer.singleShot(0, lambda: self.fsw.update_filepath(init_path))
+
     def gen_layout(self):
         """
         Set up layout and add widgets for input recording selection.
@@ -2029,6 +2034,9 @@ class InputDataSelectionPopup(QtWidgets.QDialog):
     def pipeline_finished_slot(self):
         """ Worker successfully completed the processing pipeline """
         self.last_saved_ddir = str(self.save_le.text())
+        if self._bulk_mode:
+            self.accept()
+            return
         msg = 'Data processing complete!<br><br>Load another recording?'
         res = gi.MsgboxSave(msg, parent=self).exec()
         if res == QtWidgets.QMessageBox.Yes:
@@ -2079,6 +2087,178 @@ class InputDataSelectionPopup(QtWidgets.QDialog):
         self.paw.deleteLater()
         self.paw = None
         
+class BulkLoadPopup(QtWidgets.QDialog):
+    """
+    Popup for bulk-loading multiple recordings sequentially through the
+    Step 1 pipeline.  The user adds up to 99 paths, clicks Run All, and
+    each path is processed one at a time via InputDataSelectionPopup.
+    """
+
+    MAX_ROWS = 99
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('Bulk Load Data')
+        self.setWindowIcon(QtGui.QIcon(':/resources/logo.png'))
+        gi.remove_help_button(self)
+        self.setStyleSheet("QDialog { background-color: white; }")
+        self._path_rows = []   # list of (frame, line_edit) tuples
+        self._build_ui()
+
+    # ------------------------------------------------------------------
+    # UI construction
+    # ------------------------------------------------------------------
+
+    def _build_ui(self):
+        outer = QtWidgets.QVBoxLayout(self)
+        outer.setSpacing(10)
+        outer.setContentsMargins(14, 14, 14, 14)
+
+        # Title label
+        title = QtWidgets.QLabel('Step 1: Bulk Load Data')
+        title.setAlignment(QtCore.Qt.AlignCenter)
+        title_font = title.font()
+        title_font.setPointSize(13)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        outer.addWidget(title)
+
+        # Scroll area that holds the path rows
+        self.scroll_area = QtWidgets.QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QtWidgets.QFrame.NoFrame)
+
+        self.rows_widget = QtWidgets.QWidget()
+        self.rows_widget.setStyleSheet("background-color: white;")
+        self.rows_layout = QtWidgets.QVBoxLayout(self.rows_widget)
+        self.rows_layout.setSpacing(6)
+        self.rows_layout.setContentsMargins(0, 0, 0, 0)
+        self.rows_layout.addStretch()
+
+        self.scroll_area.setWidget(self.rows_widget)
+        outer.addWidget(self.scroll_area, stretch=1)
+
+        # "Add Recording" button
+        self.add_btn = QtWidgets.QPushButton('+ Add Recording')
+        self.add_btn.setStyleSheet(QSS.TOGGLE_BTN)
+        self.add_btn.clicked.connect(self._add_row)
+        outer.addWidget(self.add_btn)
+
+        # Bottom buttons
+        btn_row = QtWidgets.QHBoxLayout()
+        self.cancel_btn = QtWidgets.QPushButton('Cancel')
+        self.cancel_btn.setStyleSheet(QSS.TOGGLE_BTN)
+        self.cancel_btn.clicked.connect(self.reject)
+
+        self.run_btn = QtWidgets.QPushButton('Run All')
+        self.run_btn.setStyleSheet(
+            QSS.TOGGLE_BTN + "QPushButton { background-color: #c8f0c8; }"
+        )
+        self.run_btn.clicked.connect(self._run_all)
+
+        btn_row.addWidget(self.cancel_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(self.run_btn)
+        outer.addLayout(btn_row)
+
+        self.setMinimumSize(560, 400)
+
+        # Start with 3 default empty rows
+        for _ in range(3):
+            self._add_row()
+
+    # ------------------------------------------------------------------
+    # Row management
+    # ------------------------------------------------------------------
+
+    def _add_row(self):
+        if len(self._path_rows) >= self.MAX_ROWS:
+            return
+
+        idx = len(self._path_rows)
+        num = idx + 1
+
+        frame = QtWidgets.QFrame()
+        frame.setStyleSheet(
+            "QFrame { background-color: #E8E8E8; border-radius: 4px; }"
+        )
+        row_layout = QtWidgets.QHBoxLayout(frame)
+        row_layout.setContentsMargins(8, 6, 8, 6)
+        row_layout.setSpacing(6)
+
+        num_label = QtWidgets.QLabel(f'{num}.')
+        num_label.setFixedWidth(28)
+        num_label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+
+        line_edit = QtWidgets.QLineEdit()
+        line_edit.setPlaceholderText('Path to recording folder / file…')
+
+        browse_btn = QtWidgets.QPushButton('Browse')
+        browse_btn.setStyleSheet(QSS.TOGGLE_BTN)
+        browse_btn.setFixedWidth(70)
+        browse_btn.clicked.connect(lambda _, le=line_edit: self._browse(le))
+
+        remove_btn = QtWidgets.QPushButton('Remove')
+        remove_btn.setStyleSheet(QSS.TOGGLE_BTN)
+        remove_btn.setFixedWidth(70)
+        remove_btn.clicked.connect(lambda _, f=frame: self._remove_row(f))
+
+        row_layout.addWidget(num_label)
+        row_layout.addWidget(line_edit, stretch=1)
+        row_layout.addWidget(browse_btn)
+        row_layout.addWidget(remove_btn)
+
+        # Insert before the trailing stretch
+        insert_pos = self.rows_layout.count() - 1
+        self.rows_layout.insertWidget(insert_pos, frame)
+        self._path_rows.append((frame, line_edit))
+
+        if len(self._path_rows) >= self.MAX_ROWS:
+            self.add_btn.setEnabled(False)
+
+    def _remove_row(self, frame):
+        for i, (f, le) in enumerate(self._path_rows):
+            if f is frame:
+                self._path_rows.pop(i)
+                self.rows_layout.removeWidget(frame)
+                frame.deleteLater()
+                break
+        self.add_btn.setEnabled(True)
+        self._renumber_rows()
+
+    def _renumber_rows(self):
+        for i, (frame, _) in enumerate(self._path_rows):
+            label = frame.findChild(QtWidgets.QLabel)
+            if label:
+                label.setText(f'{i + 1}.')
+
+    def _browse(self, line_edit):
+        path = QtWidgets.QFileDialog.getExistingDirectory(
+            self, 'Select recording folder', line_edit.text() or os.path.expanduser('~')
+        )
+        if not path:
+            # Also allow file selection for formats like .npy/.mat
+            path, _ = QtWidgets.QFileDialog.getOpenFileName(
+                self, 'Select recording file', line_edit.text() or os.path.expanduser('~')
+            )
+        if path:
+            line_edit.setText(path)
+
+    # ------------------------------------------------------------------
+    # Run all paths sequentially
+    # ------------------------------------------------------------------
+
+    def _run_all(self):
+        paths = [le.text().strip() for _, le in self._path_rows if le.text().strip()]
+        if not paths:
+            gi.MsgboxError('No recording paths entered.', parent=self).exec()
+            return
+
+        for path in paths:
+            popup = InputDataSelectionPopup(parent=self, init_path=path, bulk_mode=True)
+            popup.exec()
+
+
 if __name__ == '__main__':
     app = pyfx.qapp()
     qfd = QtWidgets.QFileDialog()

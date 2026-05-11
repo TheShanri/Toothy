@@ -32,7 +32,7 @@ import gui_items as gi  #  GUI helpers
 import resources_v2     # Compiled resources (images) referenced with ":/..."
 
 # Import QDialog widgets for each part of the Toothy workflow
-from raw_data_pipeline import InputDataSelectionPopup               # Step 1 (Selection of input data, triggers processing pipeline)
+from raw_data_pipeline import InputDataSelectionPopup, BulkLoadPopup  # Step 1 (Selection of input data, triggers processing pipeline)
 from processed_data_hub import ProcessedRecordingSelectionPopup     # Step 2 (Interact with the processed data to select channels and classify events)
 from gui_set_paths import SetPathsPopup                             # Convenience: Set paths for input data, probe configuration files, etc.
 from gui_set_parameters import SetParametersPopup                   # Convenience: Set parameters
@@ -118,6 +118,7 @@ class toothy(QtWidgets.QMainWindow):
 
         # Create buttons for main event detection pipeline
         self.process_btn = QtWidgets.QPushButton('Step 1: Load data')
+        self.bulk_process_btn = QtWidgets.QPushButton('Step 1: Bulk load data')
         self.analyze_btn = QtWidgets.QPushButton('Step 2: Analyze events')
 
         # Create buttons for convenience functions
@@ -128,6 +129,7 @@ class toothy(QtWidgets.QMainWindow):
         # Style the buttons
         self.home_btns = [
              self.process_btn,        # Process input recording (file ingestion, filtering, event detection)
+             self.bulk_process_btn,   # Bulk process multiple recordings sequentially
              self.analyze_btn,        # Analyze detected events
              self.set_paths_btn,      # Update default directories to data/probes/parameters
              self.set_parameters_btn, # View/edit analysis parameter
@@ -145,11 +147,12 @@ class toothy(QtWidgets.QMainWindow):
         }"""
         for btn in self.home_btns:
             btn.setStyleSheet(home_button_stylesheet)
-            
+
         # Add headings/subheadings/buttons to layout in order
         self.centralLayout.addWidget(self.heading_label)    # "Toothy"
         self.centralLayout.addWidget(self.subhead1)         # "Event detection pipeline"
         self.centralLayout.addWidget(self.process_btn)      # Button for step 1
+        self.centralLayout.addWidget(self.bulk_process_btn) # Button for bulk step 1
         self.centralLayout.addWidget(self.analyze_btn)      # Button for step 2
         self.centralLayout.addWidget(self.subhead2)         # "Convenience"
         self.centralLayout.addWidget(self.set_paths_btn)    # Button for setting paths
@@ -168,6 +171,7 @@ class toothy(QtWidgets.QMainWindow):
         """
         # Connect button "clicked" signals to slots (functions that open QDialogs)
         self.process_btn.clicked.connect(self.raw_data_popup)
+        self.bulk_process_btn.clicked.connect(self.bulk_data_popup)
         self.analyze_btn.clicked.connect(self.processed_data_popup)
         self.set_paths_btn.clicked.connect(self.set_paths_popup_signal)
         self.set_parameters_btn.clicked.connect(self.set_parameters_popup_signal)
@@ -180,6 +184,11 @@ class toothy(QtWidgets.QMainWindow):
         # set analysis hub to the most recently processed recording folder
         if self.rawdata_popup.last_saved_ddir is not None:
             self.init_processed_ddir = str(self.rawdata_popup.last_saved_ddir)
+
+    def bulk_data_popup(self, *args):
+        """ Bulk load multiple recordings sequentially through the Step 1 pipeline """
+        popup = BulkLoadPopup(parent=self)
+        popup.exec()
         
     def processed_data_popup(self, *args):
         """ Show processed data options """
