@@ -204,6 +204,9 @@ def get_extractor(ppath, data_format, **kwargs):
             exclude = [f for f in os.listdir(folder_path) if not os.path.isfile(Path(folder_path, f))] # Exclude any directories in the folder
 
             recording = extractors.NeuralynxRecordingExtractor(folder_path=folder_path, stream_id='0', exclude_filename=exclude) # Note this line produces a bug about the "exclude_filename" argument, but fixing it to what the bug suggests ("exclude_filenames") breaks the line
+            if recording.get_num_segments() > 1:
+                print(f"Concatenating {recording.get_num_segments()} segments from Neuralynx recording")
+                recording = spikeinterface.concatenate_recordings([recording])
             n_samples = recording.get_num_samples()
 
             # Get time array
