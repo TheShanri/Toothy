@@ -31,6 +31,66 @@ import pyfx
 import ephys
 import gui_items as gi
 
+def _patch_neuralynx_header():
+    """
+    Neo's NlxHeader.readTimeDate raises IOError when it can't match the
+    header timestamp pattern for a given Cheetah version (e.g. 5.6.3 writes
+    'At Time:' style headers but neo expects the '(h:m:s.ms)' format for
+    that version range).  This patch makes it fall back through every known
+    pattern before giving up, so recordings load regardless of the mismatch.
+    """
+    try:
+        import re, datetime
+        from neo.rawio.neuralynxrawio.nlxheader import NlxHeader
+        _orig = NlxHeader.readTimeDate
+
+        def _permissive_readTimeDate(self, txt_header):
+            try:
+                _orig(self, txt_header)
+                return
+            except IOError:
+                pass
+            # try every known pattern as a fallback
+            for hpd in NlxHeader.header_pattern_dicts.values():
+                sr = re.search(hpd["datetime1_regex"], txt_header)
+                if not sr:
+                    continue
+                dt1 = sr.groupdict()
+                for fmt_key in ("datetimeformat", "datetime2format"):
+                    if fmt_key not in hpd:
+                        continue
+                    try:
+                        self["recording_opened"] = datetime.datetime.strptime(
+                            dt1["date"] + " " + dt1["time"], hpd[fmt_key]
+                        )
+                        break
+                    except Exception:
+                        continue
+                else:
+                    self["recording_opened"] = None
+                if "datetime2_regex" in hpd:
+                    sr2 = re.search(hpd["datetime2_regex"], txt_header)
+                    if sr2:
+                        dt2 = sr2.groupdict()
+                        for fmt_key in ("datetimeformat", "datetime2format"):
+                            if fmt_key not in hpd:
+                                continue
+                            try:
+                                self["recording_closed"] = datetime.datetime.strptime(
+                                    dt2["date"] + " " + dt2["time"], hpd[fmt_key]
+                                )
+                                break
+                            except Exception:
+                                continue
+                return
+            self["recording_opened"] = None  # nothing matched; allow loading without timestamp
+
+        NlxHeader.readTimeDate = _permissive_readTimeDate
+    except Exception:
+        pass
+
+_patch_neuralynx_header()
+
 supported_formats = {'NeuroNexus' : ['NeuroNexus', '.xdat.json'],
                      'OpenEphys'  : ['Open Ephys', '.oebin'],
                      'Neuralynx'  : ['NeuraLynx', '.ncs'],
@@ -218,8 +278,8 @@ def get_extractor(ppath, data_format, **kwargs):
                     time = None # Not sure this case ever happens, but basically time is only useful if it is aligned with the recording
             except:
                 time = None # If issues are encountered when loading the times, set time to None to treat recording as if there is no time
-        except:
-            raise Exception('Unable to load Neuralynx extractor.')
+        except Exception as _nlx_err:
+            raise Exception(f'Unable to load Neuralynx extractor.\n\n{_nlx_err}')
         
     ##### Neurodata Without Borders #####
     elif data_format == 'NWB':

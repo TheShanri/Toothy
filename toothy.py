@@ -32,7 +32,7 @@ import gui_items as gi  #  GUI helpers
 import resources_v2     # Compiled resources (images) referenced with ":/..."
 
 # Import QDialog widgets for each part of the Toothy workflow
-from raw_data_pipeline import InputDataSelectionPopup, BulkLoadPopup  # Step 1 (Selection of input data, triggers processing pipeline)
+from raw_data_pipeline import InputDataSelectionPopup, BulkLoadPopup, BulkChannelSelectionPopup, BulkResultsPopup  # Step 1 (Selection of input data, triggers processing pipeline)
 from processed_data_hub import ProcessedRecordingSelectionPopup     # Step 2 (Interact with the processed data to select channels and classify events)
 from gui_set_paths import SetPathsPopup                             # Convenience: Set paths for input data, probe configuration files, etc.
 from gui_set_parameters import SetParametersPopup                   # Convenience: Set parameters
@@ -120,6 +120,8 @@ class toothy(QtWidgets.QMainWindow):
         self.process_btn = QtWidgets.QPushButton('Step 1: Load data')
         self.bulk_process_btn = QtWidgets.QPushButton('Step 1: Bulk load data')
         self.analyze_btn = QtWidgets.QPushButton('Step 2: Analyze events')
+        self.bulk_channel_btn = QtWidgets.QPushButton('Step 2: Bulk channel selection')
+        self.bulk_results_btn = QtWidgets.QPushButton('Step 3: Bulk results')
 
         # Create buttons for convenience functions
         self.set_paths_btn = QtWidgets.QPushButton('Set paths')
@@ -131,6 +133,8 @@ class toothy(QtWidgets.QMainWindow):
              self.process_btn,        # Process input recording (file ingestion, filtering, event detection)
              self.bulk_process_btn,   # Bulk process multiple recordings sequentially
              self.analyze_btn,        # Analyze detected events
+             self.bulk_channel_btn,   # Bulk-save event channels from CSV without GUI
+             self.bulk_results_btn,   # Bulk DS classification and results export
              self.set_paths_btn,      # Update default directories to data/probes/parameters
              self.set_parameters_btn, # View/edit analysis parameter
              self.probe_btn           # Create probe configuration files
@@ -154,6 +158,8 @@ class toothy(QtWidgets.QMainWindow):
         self.centralLayout.addWidget(self.process_btn)      # Button for step 1
         self.centralLayout.addWidget(self.bulk_process_btn) # Button for bulk step 1
         self.centralLayout.addWidget(self.analyze_btn)      # Button for step 2
+        self.centralLayout.addWidget(self.bulk_channel_btn) # Button for bulk channel selection
+        self.centralLayout.addWidget(self.bulk_results_btn) # Button for bulk DS classification
         self.centralLayout.addWidget(self.subhead2)         # "Convenience"
         self.centralLayout.addWidget(self.set_paths_btn)    # Button for setting paths
         self.centralLayout.addWidget(self.set_parameters_btn)   # Button for setting parametes
@@ -173,6 +179,8 @@ class toothy(QtWidgets.QMainWindow):
         self.process_btn.clicked.connect(self.raw_data_popup)
         self.bulk_process_btn.clicked.connect(self.bulk_data_popup)
         self.analyze_btn.clicked.connect(self.processed_data_popup)
+        self.bulk_channel_btn.clicked.connect(self.bulk_channel_popup)
+        self.bulk_results_btn.clicked.connect(self.bulk_results_popup)
         self.set_paths_btn.clicked.connect(self.set_paths_popup_signal)
         self.set_parameters_btn.clicked.connect(self.set_parameters_popup_signal)
         self.probe_btn.clicked.connect(self.probe_popup)
@@ -189,7 +197,17 @@ class toothy(QtWidgets.QMainWindow):
         """ Bulk load multiple recordings sequentially through the Step 1 pipeline """
         popup = BulkLoadPopup(parent=self)
         popup.exec()
-        
+
+    def bulk_channel_popup(self, *args):
+        """ Bulk-save Fissure/Ripple/Hilus channels from a CSV without launching the analysis GUI """
+        popup = BulkChannelSelectionPopup(parent=self)
+        popup.exec()
+
+    def bulk_results_popup(self, *args):
+        """ Bulk DS classification: CSD + PCA for each recording, outputs summary CSV """
+        popup = BulkResultsPopup(parent=self)
+        popup.exec()
+
     def processed_data_popup(self, *args):
         """ Show processed data options """
         # create popup window for processed data

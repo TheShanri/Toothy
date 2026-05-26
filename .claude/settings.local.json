@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(..\\\\toothy_env\\\\Scripts\\\\python.exe -c \"import neo; print\\(neo.__version__\\); import neo.rawio.neuralynxrawio as n; print\\(n.__file__\\)\")",
+      "PowerShell(& \"C:\\\\Users\\\\Z390\\\\Desktop\\\\Toothy but Gold and Green\\\\toothy_env\\\\Scripts\\\\python.exe\" -c \"import neo; print\\(neo.__version__\\); import neo.rawio.neuralynxrawio as n; print\\(n.__file__\\)\")",
+      "Bash(python -c \"import neo; print\\(neo.__version__\\); import neo.rawio.neuralynxrawio as n; print\\(n.__file__\\)\")",
+      "PowerShell(\\(Get-Command conda -ErrorAction SilentlyContinue\\).Source; \\(Get-Command python -ErrorAction SilentlyContinue\\).Source)",
+      "PowerShell(& \"c:\\\\Users\\\\Z390\\\\miniconda3\\\\Scripts\\\\conda.exe\" run -n toothy_env python -c \"import neo; print\\(neo.__version__\\); import neo.rawio.neuralynxrawio as n; print\\(n.__file__\\)\")"
+    ]
+  }
+}

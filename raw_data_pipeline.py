@@ -1330,9 +1330,10 @@ class InputDataSelectionPopup(QtWidgets.QDialog):
     recording = None
     last_saved_ddir = None
     
-    def __init__(self, parent=None, init_path=None, bulk_mode=False):
+    def __init__(self, parent=None, init_path=None, bulk_mode=False, bulk_probe_file=None):
         super().__init__(parent)
         self._bulk_mode = bulk_mode
+        self._bulk_probe_file = bulk_probe_file
 
         # Set the window title (changes as the user proceeds through the workflow of this QDialog)
         self.setWindowTitle('Select input data')
@@ -1886,7 +1887,18 @@ class InputDataSelectionPopup(QtWidgets.QDialog):
 
         # Center the window after expanding it with all this information
         pyfx.center_window(self)
-    
+
+        # Bulk mode: auto-advance through probe assignment and pipeline
+        if self._bulk_mode and self._bulk_probe_file:
+            QtCore.QTimer.singleShot(150, self._bulk_auto_proceed)
+
+    def _bulk_auto_proceed(self):
+        """Auto-advance through probe assignment and pipeline in bulk mode."""
+        self.default_probe_file = self._bulk_probe_file
+        self.start_probe_assignment()
+        if self.pipeline_btn.isEnabled():
+            self.pipeline_worker()
+
     def update_target_fs(self, payload):
         self.target_fs = payload["target_hz"]
         self.params_widget.lfp_fs.update_param(self.target_fs)   # Update param!
@@ -2123,6 +2135,26 @@ class BulkLoadPopup(QtWidgets.QDialog):
         title.setFont(title_font)
         outer.addWidget(title)
 
+        # Probe file config row
+        probe_frame = QtWidgets.QFrame()
+        probe_frame.setStyleSheet("QFrame { background-color: #E8E8E8; border-radius: 4px; }")
+        probe_hlayout = QtWidgets.QHBoxLayout(probe_frame)
+        probe_hlayout.setContentsMargins(10, 8, 10, 8)
+        probe_hlayout.setSpacing(6)
+        probe_lbl = QtWidgets.QLabel('<b>Probe file:</b>')
+        probe_lbl.setFixedWidth(78)
+        self.probe_le = QtWidgets.QLineEdit()
+        self.probe_le.setReadOnly(True)
+        self.probe_le.setPlaceholderText('Browse for probe configuration file (.json / .prb / .mat)...')
+        probe_browse_btn = QtWidgets.QPushButton('Browse')
+        probe_browse_btn.setStyleSheet(pyfx.dict2ss(QSS.TOGGLE_BTN))
+        probe_browse_btn.setFixedWidth(70)
+        probe_browse_btn.clicked.connect(self._browse_probe)
+        probe_hlayout.addWidget(probe_lbl)
+        probe_hlayout.addWidget(self.probe_le, stretch=1)
+        probe_hlayout.addWidget(probe_browse_btn)
+        outer.addWidget(probe_frame)
+
         # Scroll area that holds the path rows
         self.scroll_area = QtWidgets.QScrollArea()
         self.scroll_area.setWidgetResizable(True)
@@ -2138,21 +2170,27 @@ class BulkLoadPopup(QtWidgets.QDialog):
         self.scroll_area.setWidget(self.rows_widget)
         outer.addWidget(self.scroll_area, stretch=1)
 
-        # "Add Recording" button
+        # "Add Recording" and "Import from CSV" buttons
+        add_import_row = QtWidgets.QHBoxLayout()
         self.add_btn = QtWidgets.QPushButton('+ Add Recording')
-        self.add_btn.setStyleSheet(QSS.TOGGLE_BTN)
+        self.add_btn.setStyleSheet(pyfx.dict2ss(QSS.TOGGLE_BTN))
         self.add_btn.clicked.connect(self._add_row)
-        outer.addWidget(self.add_btn)
+        import_csv_btn = QtWidgets.QPushButton('Import from CSV')
+        import_csv_btn.setStyleSheet(pyfx.dict2ss(QSS.TOGGLE_BTN))
+        import_csv_btn.clicked.connect(self._load_from_csv)
+        add_import_row.addWidget(self.add_btn)
+        add_import_row.addWidget(import_csv_btn)
+        outer.addLayout(add_import_row)
 
         # Bottom buttons
         btn_row = QtWidgets.QHBoxLayout()
         self.cancel_btn = QtWidgets.QPushButton('Cancel')
-        self.cancel_btn.setStyleSheet(QSS.TOGGLE_BTN)
+        self.cancel_btn.setStyleSheet(pyfx.dict2ss(QSS.TOGGLE_BTN))
         self.cancel_btn.clicked.connect(self.reject)
 
         self.run_btn = QtWidgets.QPushButton('Run All')
         self.run_btn.setStyleSheet(
-            QSS.TOGGLE_BTN + "QPushButton { background-color: #c8f0c8; }"
+            pyfx.dict2ss(QSS.TOGGLE_BTN) + "QPushButton { background-color: #c8f0c8; }"
         )
         self.run_btn.clicked.connect(self._run_all)
 
@@ -2194,12 +2232,12 @@ class BulkLoadPopup(QtWidgets.QDialog):
         line_edit.setPlaceholderText('Path to recording folder / file…')
 
         browse_btn = QtWidgets.QPushButton('Browse')
-        browse_btn.setStyleSheet(QSS.TOGGLE_BTN)
+        browse_btn.setStyleSheet(pyfx.dict2ss(QSS.TOGGLE_BTN))
         browse_btn.setFixedWidth(70)
         browse_btn.clicked.connect(lambda _, le=line_edit: self._browse(le))
 
         remove_btn = QtWidgets.QPushButton('Remove')
-        remove_btn.setStyleSheet(QSS.TOGGLE_BTN)
+        remove_btn.setStyleSheet(pyfx.dict2ss(QSS.TOGGLE_BTN))
         remove_btn.setFixedWidth(70)
         remove_btn.clicked.connect(lambda _, f=frame: self._remove_row(f))
 
@@ -2244,19 +2282,622 @@ class BulkLoadPopup(QtWidgets.QDialog):
         if path:
             line_edit.setText(path)
 
+    def _browse_probe(self):
+        """Browse for probe configuration file."""
+        fpath, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, 'Select probe configuration file',
+            self.probe_le.text() or os.path.expanduser('~'),
+            'Probe files (*.json *.prb *.mat)'
+        )
+        if fpath:
+            self.probe_le.setText(fpath)
+
+    def _load_from_csv(self):
+        """Import recording paths from a CSV file with a 'Path' column."""
+        fpath, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, 'Select CSV file', os.path.expanduser('~'), 'CSV files (*.csv)'
+        )
+        if not fpath:
+            return
+        try:
+            df = pd.read_csv(fpath)
+        except Exception as e:
+            gi.MsgboxError(f'Could not read CSV:\n{e}', parent=self).exec()
+            return
+        if 'Path' not in df.columns:
+            gi.MsgboxError("CSV must have a 'Path' column.", parent=self).exec()
+            return
+        paths = df['Path'].dropna().astype(str).tolist()
+        if not paths:
+            gi.MsgboxError('No paths found in CSV.', parent=self).exec()
+            return
+        for frame, _ in list(self._path_rows):
+            self._remove_row(frame)
+        for path in paths:
+            self._add_row()
+            _, le = self._path_rows[-1]
+            le.setText(path)
+        self.add_btn.setEnabled(len(self._path_rows) < self.MAX_ROWS)
+
+    def _resolve_trigger_path(self, path):
+        """Return trigger file path for InputDataSelectionPopup.
+        For NCS folders, auto-selects the first .ncs file found."""
+        if os.path.isfile(path):
+            return path
+        if os.path.isdir(path):
+            ncs_files = sorted(f for f in os.listdir(path) if f.lower().endswith('.ncs'))
+            if ncs_files:
+                return os.path.join(path, ncs_files[0])
+            return path  # OpenEphys / NeuroNexus folders are passed as-is
+        return None
+
     # ------------------------------------------------------------------
     # Run all paths sequentially
     # ------------------------------------------------------------------
 
     def _run_all(self):
+        probe_file = self.probe_le.text().strip()
+        if not probe_file or not os.path.isfile(probe_file):
+            gi.MsgboxError('Please select a probe file before running.', parent=self).exec()
+            return
+
         paths = [le.text().strip() for _, le in self._path_rows if le.text().strip()]
         if not paths:
             gi.MsgboxError('No recording paths entered.', parent=self).exec()
             return
 
         for path in paths:
-            popup = InputDataSelectionPopup(parent=self, init_path=path, bulk_mode=True)
+            trigger_path = self._resolve_trigger_path(path)
+            if trigger_path is None:
+                gi.MsgboxError(f'Could not find a valid recording in:\n{path}', parent=self).exec()
+                continue
+            popup = InputDataSelectionPopup(parent=self, init_path=trigger_path,
+                                            bulk_mode=True, bulk_probe_file=probe_file)
             popup.exec()
+
+
+class BulkChannelSelectionPopup(QtWidgets.QDialog):
+    """
+    Import a CSV (Path, Fissure Channel, Ripple Channel, Hilus Channel columns)
+    and bulk-save event channels for each processed recording without launching the GUI.
+    Optional 'Needs processing' column (TRUE/FALSE) filters which rows are processed.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('Bulk Channel Selection')
+        self._df = None
+        self._build_ui()
+
+    def _build_ui(self):
+        outer = QtWidgets.QVBoxLayout(self)
+        outer.setSpacing(12)
+        outer.setContentsMargins(16, 16, 16, 16)
+
+        info_lbl = QtWidgets.QLabel(
+            'Select a CSV with columns: Path, Fissure Channel, Ripple Channel, Hilus Channel.\n'
+            'Optional: "Needs processing" column (TRUE/FALSE) to filter rows.'
+        )
+        info_lbl.setWordWrap(True)
+        outer.addWidget(info_lbl)
+
+        # CSV file picker row
+        csv_frame = QtWidgets.QFrame()
+        csv_hlayout = QtWidgets.QHBoxLayout(csv_frame)
+        csv_hlayout.setContentsMargins(0, 0, 0, 0)
+        csv_lbl = QtWidgets.QLabel('CSV file:')
+        csv_lbl.setFixedWidth(60)
+        self.csv_le = QtWidgets.QLineEdit()
+        self.csv_le.setReadOnly(True)
+        self.csv_le.setPlaceholderText('Browse for CSV file...')
+        csv_browse_btn = QtWidgets.QPushButton('Browse')
+        csv_browse_btn.setStyleSheet(pyfx.dict2ss(QSS.TOGGLE_BTN))
+        csv_browse_btn.setFixedWidth(70)
+        csv_browse_btn.clicked.connect(self._browse_csv)
+        csv_hlayout.addWidget(csv_lbl)
+        csv_hlayout.addWidget(self.csv_le, stretch=1)
+        csv_hlayout.addWidget(csv_browse_btn)
+        outer.addWidget(csv_frame)
+
+        # Status / results area
+        self.status_txt = QtWidgets.QTextEdit()
+        self.status_txt.setReadOnly(True)
+        self.status_txt.setPlaceholderText('Load a CSV file then click "Run" to save channels...')
+        self.status_txt.setMinimumHeight(200)
+        outer.addWidget(self.status_txt, stretch=1)
+
+        # Bottom buttons
+        btn_row = QtWidgets.QHBoxLayout()
+        self.close_btn = QtWidgets.QPushButton('Close')
+        self.close_btn.setStyleSheet(pyfx.dict2ss(QSS.TOGGLE_BTN))
+        self.close_btn.clicked.connect(self.reject)
+        self.run_btn = QtWidgets.QPushButton('Run')
+        self.run_btn.setStyleSheet(
+            pyfx.dict2ss(QSS.TOGGLE_BTN) + "QPushButton { background-color: #c8f0c8; }"
+        )
+        self.run_btn.clicked.connect(self._run)
+        self.run_btn.setEnabled(False)
+        btn_row.addWidget(self.close_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(self.run_btn)
+        outer.addLayout(btn_row)
+
+        self.setMinimumSize(520, 400)
+
+    def _browse_csv(self):
+        fpath, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, 'Select CSV file', os.path.expanduser('~'), 'CSV files (*.csv)'
+        )
+        if not fpath:
+            return
+        try:
+            df = pd.read_csv(fpath)
+        except Exception as e:
+            gi.MsgboxError(f'Could not read CSV:\n{e}', parent=self).exec()
+            return
+
+        required = {'Path', 'Ripple Channel', 'Fissure Channel', 'Hilus Channel'}
+        missing = required - set(df.columns)
+        if missing:
+            gi.MsgboxError(
+                f"CSV is missing required columns: {', '.join(sorted(missing))}", parent=self
+            ).exec()
+            return
+
+        self.csv_le.setText(fpath)
+
+        if 'Needs processing' in df.columns:
+            mask = df['Needs processing'].astype(str).str.strip().str.upper().isin(
+                ['TRUE', '1', 'YES']
+            )
+            n_total = len(df)
+            self._df = df[mask].reset_index(drop=True)
+            self.status_txt.setText(
+                f'Loaded {n_total} rows; {len(self._df)} marked for processing.\n'
+                'Click "Run" to save channels.'
+            )
+        else:
+            self._df = df.dropna(subset=['Path']).reset_index(drop=True)
+            self.status_txt.setText(
+                f'Loaded {len(self._df)} rows (no "Needs processing" column — using all rows).\n'
+                'Click "Run" to save channels.'
+            )
+
+        self.run_btn.setEnabled(len(self._df) > 0)
+
+    def _run(self):
+        if self._df is None or len(self._df) == 0:
+            return
+
+        lines = []
+        n_ok = n_skip = n_err = 0
+
+        for _, row in self._df.iterrows():
+            raw_path = str(row['Path']).strip()
+            toothy_ddir = str(Path(raw_path, 'toothy'))
+
+            if not dp.validate_processed_ddir(toothy_ddir):
+                lines.append(
+                    f'[SKIP]  {raw_path}\n'
+                    '        → No valid processed data in toothy subfolder'
+                )
+                n_skip += 1
+                continue
+
+            try:
+                # CSV holds display values (1-indexed, matching what the GUI spinboxes show).
+                # Subtract 1 to get the 0-indexed values that are stored in the .npy file.
+                fissure_disp = int(row['Fissure Channel'])
+                ripple_disp  = int(row['Ripple Channel'])
+                hil_disp     = int(row['Hilus Channel'])
+                fissure_chan = fissure_disp - 1
+                ripple_chan  = ripple_disp - 1
+                hil_chan     = hil_disp - 1
+            except (ValueError, TypeError) as e:
+                lines.append(f'[ERROR] {raw_path}\n        → Invalid channel values: {e}')
+                n_err += 1
+                continue
+
+            try:
+                # new_channels order: [theta/fissure, ripple, hilus]
+                ephys.save_event_channels(
+                    toothy_ddir, iprb=0, ishank=0,
+                    new_channels=[fissure_chan, ripple_chan, hil_chan]
+                )
+                # Create DS_DF_probe0-shank0 so "Classify dentate spikes" becomes enabled
+                self._create_ds_df(toothy_ddir, hil_chan)
+                lines.append(
+                    f'[OK]    {raw_path}\n'
+                    f'        → Fissure={fissure_disp}, Ripple={ripple_disp}, Hilus={hil_disp}'
+                )
+                n_ok += 1
+            except Exception as e:
+                lines.append(f'[ERROR] {raw_path}\n        → Save failed: {e}')
+                n_err += 1
+
+        summary = f'Done: {n_ok} saved, {n_skip} skipped, {n_err} errors\n\n'
+        self.status_txt.setText(summary + '\n'.join(lines))
+        self.run_btn.setEnabled(False)
+
+    def _create_ds_df(self, toothy_ddir, hil_chan):
+        """Create DS_DF_probe0-shank0 from DATA.hdf5 so the classification GUI can be opened."""
+        hdf5_path = Path(toothy_ddir, 'DATA.hdf5')
+        if not os.path.isfile(hdf5_path):
+            return  # Older npz-format recording; skip
+        probe = ephys.read_probe_group(toothy_ddir).probes[0]
+        DF_ALL = pd.read_hdf(str(hdf5_path), key=ephys.get_h5_key('ALL_DS', iprb=0))
+        STD    = pd.read_hdf(str(hdf5_path), key=ephys.get_h5_key('STD',    iprb=0))
+        DS_ALL = ephys.clean_event_df(DF_ALL, STD, probe)
+        if hil_chan in DS_ALL.index:
+            DS_DF = DS_ALL.loc[[hil_chan]]  # double brackets → always a DataFrame
+            DS_DF = DS_DF[DS_DF['is_valid'] == 1].reset_index(drop=True)
+        else:
+            DS_DF = pd.DataFrame(columns=DS_ALL.columns)
+        DS_DF.to_csv(Path(toothy_ddir, 'DS_DF_probe0-shank0'), index_label=False)
+
+
+def _headless_ds_classify(ddir, iprb=0, ishank=0, bad_channels=None, progress_fn=None):
+    """
+    Run DS CSD calculation + PCA classification without the GUI.
+    Replicates DS_CSDWindow.calculate_csd() + save_csd() using default settings.
+    bad_channels: list of absolute 0-indexed probe channel numbers to mark as noisy.
+    progress_fn: optional callable(str) for live step-by-step progress reporting.
+    Saves results to CSDs.hdf5 and DS_DF_probe{iprb}-shank{ishank}.csv.
+    Returns (ds1_n, ds2_n).
+    """
+    from copy import deepcopy
+    from sklearn.decomposition import PCA
+    from sklearn.cluster import KMeans, DBSCAN
+    import quantities as pq
+
+    def _step(msg):
+        if progress_fn is not None:
+            progress_fn(msg)
+
+    # Probe / shank geometry
+    probe = ephys.read_probe_group(ddir).probes[iprb]
+    shank = probe.get_shanks()[ishank]
+    ypos = np.array(sorted(shank.contact_positions[:, 1]))
+    coord_electrode = pq.Quantity(ypos, probe.si_units).rescale('m', dtype='float32')
+    shank_channels = shank.get_indices()
+    channels = np.arange(len(shank_channels), dtype='int')
+
+    # Relative index of the fissure/theta channel — CSD window starts here
+    event_channels = ephys.load_event_channels(ddir, iprb, ishank=ishank)
+    if event_channels is None or None in event_channels:
+        raise ValueError('Event channels not set — run bulk channel selection first')
+    rel_theta_chan = list(shank_channels).index(event_channels[0])
+
+    # Load LFP and noise annotation
+    dmode = dp.validate_processed_ddir(ddir)
+    FF = None
+    _step(f'  Loading LFP data ({len(shank_channels)} channels)...')
+    if dmode == 1:
+        FF = h5py.File(str(Path(ddir, 'DATA.hdf5')), 'r+')
+        lfp_fs = int(FF.attrs['lfp_fs'])
+        lfp_all = ephys.load_h5_lfp(FF, key='raw', iprb=iprb)[shank_channels, :]
+        NOISE_ALL = ephys.load_h5_array(FF, 'NOISE', iprb, in_memory=True)
+        NOISE_TRAIN = NOISE_ALL[shank_channels].copy()
+    elif dmode == 2:
+        lfp_all = ephys.load_bp(ddir, key='raw', iprb=iprb)[shank_channels, :]
+        lfp_fs = int(np.load(Path(ddir, 'lfp_fs.npy')))
+        NOISE_ALL = ephys.load_noise_channels(ddir, iprb=iprb).copy()
+        NOISE_TRAIN = NOISE_ALL[shank_channels].copy()
+    else:
+        raise ValueError('No valid processed data found')
+    _step(f'  LFP loaded: {lfp_all.shape[0]} ch × {lfp_all.shape[1]:,} samples  '
+          f'({lfp_fs} Hz,  {lfp_all.shape[1]/lfp_fs/60:.1f} min)')
+
+    # Apply bad channels from the CSV to the noise annotation and persist them
+    if bad_channels:
+        newly_marked = []
+        for ch in bad_channels:
+            if ch in shank_channels and not NOISE_ALL[ch]:
+                NOISE_ALL[ch] = 1
+                NOISE_TRAIN[list(shank_channels).index(ch)] = 1
+                newly_marked.append(ch)
+        if newly_marked:
+            _step(f'  Marking {len(newly_marked)} bad channel(s) as noisy: {newly_marked}')
+            if dmode == 1:
+                FF[f'{iprb}']['NOISE'][:] = NOISE_ALL
+            else:
+                noise_list = list(np.load(Path(ddir, 'noise_channels.npy'), allow_pickle=True))
+                noise_list[iprb] = NOISE_ALL
+                np.save(Path(ddir, 'noise_channels.npy'), noise_list, allow_pickle=True)
+        already = [ch for ch in bad_channels if ch in shank_channels and ch not in newly_marked]
+        if already:
+            _step(f'  Already noisy (skipped): {already}')
+
+    # Interpolate noisy channels (mirrors DS_CSDWindow.interp_data)
+    noise_idx = np.nonzero(NOISE_TRAIN)[0]
+    clean_idx = np.setdiff1d(channels, noise_idx)
+    if len(noise_idx):
+        _step(f'  Interpolating {len(noise_idx)} noisy channel(s): '
+              f'{list(shank_channels[noise_idx])}')
+    lfp_interp = deepcopy(lfp_all)
+    for i in noise_idx:
+        if len(clean_idx) == 0:
+            lfp_interp[i] = np.zeros_like(lfp_interp[i])
+        elif i < int(min(clean_idx)):
+            lfp_interp[i] = lfp_all[int(min(clean_idx))]
+        elif i > int(max(clean_idx)):
+            lfp_interp[i] = lfp_all[int(max(clean_idx))]
+        else:
+            s1 = lfp_all[int(pyfx.Closest(i, clean_idx[clean_idx < i]))]
+            s2 = lfp_all[int(pyfx.Closest(i, clean_idx[clean_idx > i]))]
+            lfp_interp[i] = np.nanmean([s1, s2], axis=0)
+
+    # Load DS events and recording params
+    DS_DF = ephys.load_ds_dataset(ddir, iprb, ishank)
+    if DS_DF is None or len(DS_DF) < 2:
+        raise ValueError(f'Too few DS events ({0 if DS_DF is None else len(DS_DF)}) — cannot classify')
+    DS_DF = DS_DF.copy()
+    iev = np.atleast_1d(DS_DF.idx.values)
+    ddict = dict(ephys.load_recording_params(ddir))
+    algo = str(ddict.get('clus_algo', 'kmeans'))
+    _step(f'  DS dataset: {len(iev):,} valid events  |  '
+          f'event channels — fissure: {event_channels[0]+1}, '
+          f'ripple: {event_channels[1]+1}, hilus: {event_channels[2]+1}')
+
+    # CSD channel window: fissure/theta channel → bottom of shank (GUI default)
+    csd_chs = np.arange(rel_theta_chan, len(channels))
+
+    def _csd(idx):
+        data = lfp_interp[csd_chs, :][:, idx]
+        obj = ephys.get_csd_obj(data, coord_electrode[csd_chs], ddict)
+        return ephys.csd_obj2arrs(obj)
+
+    _step(f'  Computing CSD  ({len(csd_chs)} channels, {len(iev):,} events)...')
+    raw_csd, filt_csd, norm_filt_csd = _csd(iev)
+
+    _step(f'  PCA + {algo.upper()} clustering...')
+    pca_fit = PCA(n_components=2).fit_transform(norm_filt_csd.T)
+
+    def _set_ds_type(types):
+        rows1, rows2 = np.where(types == 1)[0], np.where(types == 2)[0]
+        if not len(rows1) or not len(rows2):
+            return types
+        c1 = _csd(DS_DF.idx.values[rows1])[2]
+        c2 = _csd(DS_DF.idx.values[rows2])[2]
+        if np.argmin(np.nanmean(c1, axis=1)) > np.argmin(np.nanmean(c2, axis=1)):
+            types[rows1] = 2
+            types[rows2] = 1
+        return types
+
+    km = KMeans(n_clusters=int(ddict.get('nclusters', 2)), n_init='auto').fit(pca_fit)
+    db = DBSCAN(eps=float(ddict.get('eps', 0.2)),
+                min_samples=int(ddict.get('min_clus_samples', 3))).fit(pca_fit)
+    km_types = _set_ds_type(np.array([{0: 2, 1: 1}.get(x, 0) for x in km.labels_]))
+    db_types = _set_ds_type(np.array([{0: 1, 1: 2}.get(x, 0) for x in db.labels_]))
+
+    dstypes = km_types if algo == 'kmeans' else db_types
+    DS_DF[['pc1', 'pc2']] = pca_fit
+    DS_DF[['k_type', 'db_type', 'type']] = np.array([km_types, db_types, dstypes]).T
+
+    ds1_n = int((DS_DF['type'] == 1).sum())
+    ds2_n = int((DS_DF['type'] == 2).sum())
+
+    _step(f'  Saving CSDs.hdf5 and DS_DF CSV...')
+    hdf5_path = str(Path(ddir, 'CSDs.hdf5'))
+    K = f'/{iprb}/{ishank}'
+    scalar_params = {k: v for k, v in ddict.items()
+                     if isinstance(v, (int, float, bool, str, np.integer, np.floating))}
+    with h5py.File(hdf5_path, 'a') as gg:
+        if K in gg:
+            del gg[K]
+        for key, arr in dict(raw_csd=raw_csd, filt_csd=filt_csd,
+                              norm_filt_csd=norm_filt_csd, csd_chs=csd_chs).items():
+            gg[f'{K}/{key}'] = arr
+        gg[K].attrs.update(scalar_params)
+    DS_DF.to_hdf(hdf5_path, key=f'{K}/DS_DF', mode='a')
+    DS_DF.to_csv(str(Path(ddir, f'DS_DF_probe{iprb}-shank{ishank}')), index_label=False)
+
+    if FF is not None:
+        FF.close()
+
+    return ds1_n, ds2_n
+
+
+class BulkResultsPopup(QtWidgets.QDialog):
+    """
+    Import a CSV (same feeder-sheet format) and run headless DS classification
+    for each recording: calculates CSD + PCA, saves results, and writes a
+    summary CSV with DS Type 1 / Type 2 counts.
+    Ask for the output CSV path before running.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('Step 3: Bulk DS Classification')
+        self._df = None
+        self._build_ui()
+
+    def _build_ui(self):
+        outer = QtWidgets.QVBoxLayout(self)
+        outer.setSpacing(12)
+        outer.setContentsMargins(16, 16, 16, 16)
+
+        info_lbl = QtWidgets.QLabel(
+            'Select a CSV with a "Path" column (and optionally "Session ID" and\n'
+            '"Needs processing"). Then choose where to save the results summary\n'
+            'before clicking Run.'
+        )
+        info_lbl.setWordWrap(True)
+        outer.addWidget(info_lbl)
+
+        # Input CSV row
+        csv_frame = QtWidgets.QFrame()
+        csv_hl = QtWidgets.QHBoxLayout(csv_frame)
+        csv_hl.setContentsMargins(0, 0, 0, 0)
+        csv_lbl = QtWidgets.QLabel('Input CSV:')
+        csv_lbl.setFixedWidth(80)
+        self.csv_le = QtWidgets.QLineEdit()
+        self.csv_le.setReadOnly(True)
+        self.csv_le.setPlaceholderText('Browse for feeder-sheet CSV...')
+        csv_btn = QtWidgets.QPushButton('Browse')
+        csv_btn.setStyleSheet(pyfx.dict2ss(QSS.TOGGLE_BTN))
+        csv_btn.setFixedWidth(70)
+        csv_btn.clicked.connect(self._browse_csv)
+        csv_hl.addWidget(csv_lbl)
+        csv_hl.addWidget(self.csv_le, stretch=1)
+        csv_hl.addWidget(csv_btn)
+        outer.addWidget(csv_frame)
+
+        # Output CSV row
+        out_frame = QtWidgets.QFrame()
+        out_hl = QtWidgets.QHBoxLayout(out_frame)
+        out_hl.setContentsMargins(0, 0, 0, 0)
+        out_lbl = QtWidgets.QLabel('Output CSV:')
+        out_lbl.setFixedWidth(80)
+        self.out_le = QtWidgets.QLineEdit()
+        self.out_le.setReadOnly(True)
+        self.out_le.setPlaceholderText('Choose where to save the results summary...')
+        out_btn = QtWidgets.QPushButton('Browse')
+        out_btn.setStyleSheet(pyfx.dict2ss(QSS.TOGGLE_BTN))
+        out_btn.setFixedWidth(70)
+        out_btn.clicked.connect(self._browse_output)
+        out_hl.addWidget(out_lbl)
+        out_hl.addWidget(self.out_le, stretch=1)
+        out_hl.addWidget(out_btn)
+        outer.addWidget(out_frame)
+
+        # Status / results text
+        self.status_txt = QtWidgets.QTextEdit()
+        self.status_txt.setReadOnly(True)
+        self.status_txt.setPlaceholderText(
+            'Load a CSV and choose an output path, then click "Run"...'
+        )
+        self.status_txt.setMinimumHeight(220)
+        outer.addWidget(self.status_txt, stretch=1)
+
+        # Bottom buttons
+        btn_row = QtWidgets.QHBoxLayout()
+        self.close_btn = QtWidgets.QPushButton('Close')
+        self.close_btn.setStyleSheet(pyfx.dict2ss(QSS.TOGGLE_BTN))
+        self.close_btn.clicked.connect(self.reject)
+        self.run_btn = QtWidgets.QPushButton('Run')
+        self.run_btn.setStyleSheet(
+            pyfx.dict2ss(QSS.TOGGLE_BTN) + "QPushButton { background-color: #c8f0c8; }"
+        )
+        self.run_btn.clicked.connect(self._run)
+        self.run_btn.setEnabled(False)
+        btn_row.addWidget(self.close_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(self.run_btn)
+        outer.addLayout(btn_row)
+
+        self.setMinimumSize(560, 460)
+
+    def _browse_csv(self):
+        fpath, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, 'Select CSV file', os.path.expanduser('~'), 'CSV files (*.csv)'
+        )
+        if not fpath:
+            return
+        try:
+            df = pd.read_csv(fpath)
+        except Exception as e:
+            gi.MsgboxError(f'Could not read CSV:\n{e}', parent=self).exec()
+            return
+        if 'Path' not in df.columns:
+            gi.MsgboxError("CSV must have a 'Path' column.", parent=self).exec()
+            return
+        self.csv_le.setText(fpath)
+        if 'Needs processing' in df.columns:
+            mask = df['Needs processing'].astype(str).str.strip().str.upper().isin(
+                ['TRUE', '1', 'YES']
+            )
+            n_total = len(df)
+            self._df = df[mask].reset_index(drop=True)
+            self.status_txt.setText(
+                f'Loaded {n_total} rows; {len(self._df)} marked for processing.'
+            )
+        else:
+            self._df = df.dropna(subset=['Path']).reset_index(drop=True)
+            self.status_txt.setText(
+                f'Loaded {len(self._df)} rows (no "Needs processing" column — using all rows).'
+            )
+        self._update_run_btn()
+
+    def _browse_output(self):
+        fpath, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, 'Save results CSV', os.path.expanduser('~'), 'CSV files (*.csv)'
+        )
+        if fpath:
+            if not fpath.lower().endswith('.csv'):
+                fpath += '.csv'
+            self.out_le.setText(fpath)
+        self._update_run_btn()
+
+    def _update_run_btn(self):
+        self.run_btn.setEnabled(
+            self._df is not None and len(self._df) > 0 and bool(self.out_le.text().strip())
+        )
+
+    def _log(self, text):
+        self.status_txt.append(text)
+        QtWidgets.QApplication.processEvents()
+
+    def _run(self):
+        if self._df is None or not self.out_le.text().strip():
+            return
+
+        out_path = self.out_le.text().strip()
+        self.status_txt.clear()
+        self.run_btn.setEnabled(False)
+        results = []
+        n_ok = n_skip = n_err = 0
+        n_total = len(self._df)
+
+        for i, (_, row) in enumerate(self._df.iterrows()):
+            raw_path = str(row['Path']).strip()
+            sid_val = row.get('Session ID', None)
+            session_id = str(sid_val) if pd.notna(sid_val) else os.path.basename(raw_path)
+            toothy_ddir = str(Path(raw_path, 'toothy'))
+
+            self._log(f'\n[{i+1}/{n_total}] {session_id}\n  {raw_path}')
+
+            # Parse Bad Channels column → list of 0-indexed absolute channel numbers
+            bad_channels = []
+            bc_val = row.get('Bad Channels', None)
+            if pd.notna(bc_val) and str(bc_val).strip():
+                try:
+                    bad_channels = [int(x.strip()) for x in str(bc_val).split(',')]
+                except ValueError:
+                    pass
+            if bad_channels:
+                self._log(f'  Bad channels from CSV: {bad_channels}')
+
+            if not dp.validate_classification_ddir(toothy_ddir, 0, 0):
+                self._log(
+                    '[SKIP] Not ready for classification (run Bulk channel selection first?)'
+                )
+                n_skip += 1
+                continue
+
+            try:
+                ds1_n, ds2_n = _headless_ds_classify(
+                    toothy_ddir, iprb=0, ishank=0,
+                    bad_channels=bad_channels or None,
+                    progress_fn=self._log,
+                )
+                self._log(f'[OK]  DS Type 1 N = {ds1_n},  DS Type 2 N = {ds2_n}')
+                results.append({
+                    'Session ID':  session_id,
+                    'Path':        raw_path,
+                    'DS Type 1 N': ds1_n,
+                    'DS Type 2 N': ds2_n,
+                })
+                n_ok += 1
+            except Exception as e:
+                self._log(f'[ERROR] {e}')
+                n_err += 1
+
+        self._log(f'\nDone: {n_ok} classified, {n_skip} skipped, {n_err} errors')
+
+        if results:
+            pd.DataFrame(results).to_csv(out_path, index=False)
+            self._log(f'Summary saved → {out_path}')
 
 
 if __name__ == '__main__':
