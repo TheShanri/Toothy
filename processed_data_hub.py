@@ -336,8 +336,9 @@ class ProcessedRecordingSelectionPopup(QtWidgets.QDialog):
         """ Enable DS classification if the optimal hilus channel has been chosen """
         iprb = self.probe_dropdown.currentIndex()
         ishank = self.shank_dropdown.currentIndex()
-        opt2 = dp.validate_classification_ddir(self.ddir, iprb, ishank)
-        self.ds_classification_btn.setEnabled(opt2)
+        ok, reason = dp.diagnose_classification_ddir(self.ddir, iprb, ishank)
+        self.ds_classification_btn.setEnabled(True)
+        self.ds_classification_btn.setToolTip('' if ok else reason)
     
     def probe_updated(self):
         """ User selected a new probe """
@@ -365,10 +366,30 @@ class ProcessedRecordingSelectionPopup(QtWidgets.QDialog):
         """ Launch DS classification GUI for events on selected probe and shank """
         iprb = self.probe_dropdown.currentIndex()
         ishank = self.shank_dropdown.currentIndex()
+        ok, reason = dp.diagnose_classification_ddir(self.ddir, iprb, ishank)
+        force_show = False
+        if not ok:
+            if 'Too few valid DS events' in reason:
+                reply = QtWidgets.QMessageBox.warning(
+                    self, 'Few DS events',
+                    f'{reason}\n\nShow classification window anyway?',
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                    QtWidgets.QMessageBox.No
+                )
+                if reply != QtWidgets.QMessageBox.Yes:
+                    return
+                force_show = True
+            else:
+                gi.MsgboxError(
+                    f'Cannot classify dentate spikes:\n\n{reason}',
+                    parent=self
+                ).exec()
+                return
         # load DS dataframe
         DS_DF = ephys.load_ds_dataset(self.ddir, iprb=iprb, ishank=ishank)
-        if len(DS_DF) < 2:
-            pref = ['No dentate spikes','Only 1 dentate spike'][len(DS_DF)]
+        n_ds = 0 if DS_DF is None else len(DS_DF)
+        if not force_show and n_ds < 2:
+            pref = ['No dentate spikes', 'Only 1 dentate spike'][min(n_ds, 1)]
             gi.MsgboxError(f'{pref} detected on the hilus channel.', parent=self).exec()
             return
         self.ds_classification_dlg = DS_CSDWindow(self.ddir, iprb=iprb, ishank=ishank)

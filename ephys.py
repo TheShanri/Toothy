@@ -928,6 +928,8 @@ def load_ds_dataset(ddir, iprb, ishank, valid_only=True):
         return None
     if valid_only and 'is_valid' in DS_DF.columns:
         DS_DF = DS_DF[DS_DF['is_valid']==1].reset_index(drop=True)
+    if 'idx' in DS_DF.columns:
+        DS_DF['idx'] = DS_DF['idx'].astype(int)
     return DS_DF
     
 def load_ds_dataset_orig(ddir, iprb, ishank=-1, valid_only=True):

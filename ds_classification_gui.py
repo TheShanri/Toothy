@@ -627,37 +627,60 @@ class DS_CSDWindow(QtWidgets.QDialog):
         self.widget.save_df_btn.setEnabled(False)
         self.csd_chs = np.array(self.widget.csd_chs)
         ddict = self.widget.ddict_from_gui()
-        
+
+        if len(self.iev) == 0:
+            QtWidgets.QMessageBox.warning(
+                self, 'No DS events',
+                'No valid DS events found — cannot compute CSD.',
+                QtWidgets.QMessageBox.Ok
+            )
+            return
+
+        if len(self.csd_chs) < 2:
+            QtWidgets.QMessageBox.warning(
+                self, 'Too few CSD channels',
+                f'Need at least 2 CSD channels, found {len(self.csd_chs)}.\n'
+                'Adjust the CSD channel window.',
+                QtWidgets.QMessageBox.Ok
+            )
+            return
+
         # compute CSD of each DS peak using iCSD functions
         self.csds = self.get_csd(self.csd_chs, self.iev, ddict) # LFP value for each DS on each channel
         self.csd_lfp, self.raw_csd, self.filt_csd, self.norm_filt_csd = self.csds
-        
+
         # compute mean CSD for time window surrounding all DS peaks
         self.mean_csds = self.get_csd_surround(self.csd_chs, self.iev, ddict, twin=twin)
         self.mean_lfp = self.mean_csds[0]
 
         # run clustering algorithms
         self.run_pca(ddict)
-        
+
         # get table rows and recording indexes of DS1 vs DS2
         self.irows_ds1 = np.where(self.DS_DF.type == 1)[0]
         self.irows_ds2 = np.where(self.DS_DF.type == 2)[0]
         self.idx_ds1 = self.DS_DF.idx.values[self.irows_ds1]
         self.idx_ds2 = self.DS_DF.idx.values[self.irows_ds2]
-        
-        self.mean_csds_1 = self.get_csd_surround(self.csd_chs, self.idx_ds1, ddict, twin=twin)
-        self.mean_csds_2 = self.get_csd_surround(self.csd_chs, self.idx_ds2, ddict, twin=twin)
-        
+
+        if len(self.idx_ds1) > 0:
+            self.mean_csds_1 = self.get_csd_surround(self.csd_chs, self.idx_ds1, ddict, twin=twin)
+        else:
+            self.mean_csds_1 = self.mean_csds
+        if len(self.idx_ds2) > 0:
+            self.mean_csds_2 = self.get_csd_surround(self.csd_chs, self.idx_ds2, ddict, twin=twin)
+        else:
+            self.mean_csds_2 = self.mean_csds
+
         # update params, allow save
         self.CSD_PARAMS.update(**ddict)
         self.widget.save_btn.setEnabled(True)
-        
+
         # plot new CSDs, hide window
         self.plot_ds_csds(twin=twin)
         self.plot_bar.fig0_btn.setChecked(False)
         self.plot_bar.fig1_btn.setEnabled(True)
         self.plot_bar.fig1_btn.setChecked(False)
-        
+
         # plot PCA scatterplot
         self.plot_bar.fig27_btn.setEnabled(True)
         self.plot_bar.fig27_btn.setChecked(False)
@@ -669,7 +692,7 @@ class DS_CSDWindow(QtWidgets.QDialog):
             self.pca_widget.chks.set_active(0)
         self.pca_widget.blockSignals(False)
         self.pca_widget.plot_ds_pca(self.DS_DF)
-        
+
         # plot mean waveforms and CSDs
         self.plot_ds_by_type(twin=twin)
         self.plot_bar.fig3_btn.setEnabled(True)
@@ -766,10 +789,31 @@ class DS_CSDWindow(QtWidgets.QDialog):
         
     def run_pca(self, ddict):
         """ PCA-based clustering analysis """
+        # Ensure 2D (n_channels, n_events) — collapses to 1D when only 1 event
+        norm_csd = self.norm_filt_csd
+        if norm_csd.ndim == 1:
+            norm_csd = norm_csd[:, np.newaxis]
+        n_events, n_features = norm_csd.T.shape
+        min_dim = min(n_events, n_features)
+
+        if min_dim < 2:
+            QtWidgets.QMessageBox.warning(
+                self, 'Too few events for PCA',
+                f'PCA requires at least 2 events, but only {n_events} valid DS event(s) were found.\n\n'
+                f'All events will be labeled DS Type 1. You can still view and save the CSD.',
+                QtWidgets.QMessageBox.Ok
+            )
+            self.DS_DF['pc1']     = 0.0
+            self.DS_DF['pc2']     = 0.0
+            self.DS_DF['k_type']  = 1
+            self.DS_DF['db_type'] = 1
+            self.DS_DF['type']    = 1
+            return
+
         # principal components analysis
         pca = PCA(n_components=2)
-        pca_fit = pca.fit_transform(self.norm_filt_csd.T) # PCA
-        
+        pca_fit = pca.fit_transform(norm_csd.T) # PCA
+
         def set_ds_type(types):
             """ Label DS1 vs DS2 by sink position """
             rows1 = np.where(types == 1)[0] # initially assigned class
@@ -784,7 +828,7 @@ class DS_CSDWindow(QtWidgets.QDialog):
                 types[rows1] = 2
                 types[rows2] = 1
             return types
-        
+
         # unsupervised clustering via K-means and DBSCAN algorithms
         self.kmeans = KMeans(n_clusters=int(ddict['nclusters']), n_init='auto').fit(pca_fit)
         self.dbscan = DBSCAN(eps=ddict['eps'], min_samples=int(ddict['min_clus_samples'])).fit(pca_fit)
@@ -792,7 +836,7 @@ class DS_CSDWindow(QtWidgets.QDialog):
         kmeans_types = set_ds_type(kmeans_types_init)  # 0->1, 1->2
         db_types_init = np.array([{0:1, 1:2}.get(x, 0) for x in self.dbscan.labels_])
         db_types = set_ds_type(db_types_init) # 0->1, 1->2, other->0
-        
+
         # update PCA and classifications in dataframe
         self.DS_DF.loc[:, ['pc1', 'pc2']] = pca_fit
         dstypes = np.array(kmeans_types) if ddict['clus_algo']=='kmeans' else np.array(db_types)

@@ -1283,8 +1283,20 @@ def validate_processed_ddir(ddir):
 
 def validate_classification_ddir(ddir, iprobe, ishank):
     """ Check whether directory contains required files for DS classification """
-    try    : files = os.listdir(ddir)  
-    except : return False
+    return diagnose_classification_ddir(ddir, iprobe, ishank)[0]
+
+
+def diagnose_classification_ddir(ddir, iprobe, ishank):
+    """
+    Check each precondition for DS classification individually.
+    Returns (ok: bool, reason: str).
+    """
+    try:
+        files = os.listdir(ddir)
+    except Exception as e:
+        return False, f'Cannot read directory:\n  {ddir}\n  ({e})'
+
+    # Migrate old-format DS_DF file if present
     if f'DS_DF_{iprobe}' in files:
         PROBE_DS_DF = pd.read_csv(Path(ddir, f'DS_DF_{iprobe}')).reset_index(drop=True)
         shanks = np.unique(PROBE_DS_DF['shank'].values)
@@ -1292,11 +1304,47 @@ def validate_classification_ddir(ddir, iprobe, ishank):
             DDF = PROBE_DS_DF[PROBE_DS_DF['shank']==ishk].reset_index(drop=True)
             DDF.to_csv(Path(ddir, f'DS_DF_probe{iprobe}-shank{ishk}'), index_label=False)
         os.remove(Path(ddir, f'DS_DF_{iprobe}'))
+        files = os.listdir(ddir)  # refresh after migration
+
+    ds_df_name = f'DS_DF_probe{iprobe}-shank{ishank}'
+    if ds_df_name not in files:
+        return False, (
+            f'Missing DS event file: {ds_df_name}\n'
+            f'  Run "Select event channels" and save, or use Bulk channel selection.'
+        )
+
     try:
-        assert f'DS_DF_probe{iprobe}-shank{ishank}' in files
-        assert len(ephys.load_ds_dataset(ddir, iprobe, ishank)) > 1
+        ds_df = ephys.load_ds_dataset(ddir, iprobe, ishank)
+    except Exception as e:
+        return False, f'Could not load DS dataset ({ds_df_name}):\n  {e}'
+
+    if ds_df is None or len(ds_df) < 2:
+        n = 0 if ds_df is None else len(ds_df)
+        return False, (
+            f'Too few valid DS events in {ds_df_name}: found {n} (need ≥ 2).\n'
+            f'  Check that the hilus channel is set correctly.'
+        )
+
+    try:
         llist = ephys.load_event_channels(ddir, iprobe, ishank)
-    except:
-        return False
-    return bool(len(llist)==3 and llist != [None,None,None])
+    except Exception as e:
+        return False, f'Could not load event channels:\n  {e}'
+
+    if llist is None or len(llist) != 3:
+        return False, f'Event channel list is malformed: {llist}'
+
+    if llist == [None, None, None]:
+        return False, (
+            'Event channels (Fissure / Ripple / Hilus) are not set.\n'
+            '  Open "Select event channels" and save the channel assignments.'
+        )
+
+    none_names = [n for n, v in zip(['Fissure', 'Ripple', 'Hilus'], llist) if v is None]
+    if none_names:
+        return False, (
+            f'Some event channels are None: {none_names}\n'
+            f'  Full list: Fissure={llist[0]}, Ripple={llist[1]}, Hilus={llist[2]}'
+        )
+
+    return True, 'OK'
         
